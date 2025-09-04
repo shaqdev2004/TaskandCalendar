@@ -19,7 +19,8 @@ import { WeeklyCalendar } from "@/components/ui/taskCalendar"
 import { ManualTaskForm } from "@/components/manual-task-form"
 import { MonthlyCalendar } from "@/components/monthly-calendar"
 import type { Task } from "@/lib/task-types"
-import { parseTasks, formatDate, formatTime } from "./api/parse-event/route"
+import { parseTasks } from "@/lib/ai-parser"
+import { formatDate, formatTime } from "@/lib/date-utils"
 
 interface EditingTask {
   title: string
@@ -64,7 +65,7 @@ export default function Home() {
       const parsedTasks = await parseTasks(prompt)
       console.log("Parsed Tasks:", parsedTasks)
 
-      // Save tasks to Convex database
+      // Save tasks to Convex database (tasks are already validated in parseTasks)
       await createTasks({ tasks: parsedTasks })
       setPrompt("") // Clear the prompt after successful creation
     } catch (err) {
@@ -263,7 +264,7 @@ export default function Home() {
               Describe your tasks in natural language
             </Label>
             <p className="text-sm text-gray-500 mt-1">
-              Example: "Monday a meeting at 3pm, yoga classes at 5pm at the gym, call mom by 4pm next Monday"
+              Example: &ldquo;Monday a meeting at 3pm, yoga classes at 5pm at the gym, call mom by 4pm next Monday&rdquo;
             </p>
           </div>
 
@@ -426,7 +427,7 @@ export default function Home() {
               }
             >
               <code className="text-blue-600">
-                "Monday a meeting at 3pm, yoga classes at 5pm at the gym, call mom by 4pm next Monday"
+                "                &ldquo;Monday a meeting at 3pm, yoga classes at 5pm at the gym, call mom by 4pm next Monday&rdquo;"
               </code>
             </div>
             <div
@@ -436,7 +437,7 @@ export default function Home() {
               }
             >
               <code className="text-blue-600">
-                "Doctor appointment tomorrow at 2pm, pick up groceries at 6pm, dinner with Sarah on Friday"
+                "                &ldquo;Doctor appointment tomorrow at 2pm, pick up groceries at 6pm, dinner with Sarah on Friday&rdquo;"
               </code>
             </div>
             <div
@@ -446,7 +447,7 @@ export default function Home() {
               }
             >
               <code className="text-blue-600">
-                "Team standup every Monday at 9am for 30 minutes, lunch with client at 12:30pm downtown"
+                "                &ldquo;Team standup every Monday at 9am for 30 minutes, lunch with client at 12:30pm downtown&rdquo;"
               </code>
             </div>
           </div>
@@ -579,7 +580,7 @@ export default function Home() {
 
           <div className="py-4">
             <p className="text-sm text-gray-600">
-              Are you sure you want to delete "{taskToDelete?.task.title}"? This action cannot be undone.
+              Are you sure you want to delete &ldquo;{taskToDelete?.task.title}&rdquo;? This action cannot be undone.
             </p>
           </div>
 
