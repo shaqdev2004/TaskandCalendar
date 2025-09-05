@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { ClerkProvider } from '@clerk/nextjs'
 import ConvexClientProvider from '@/components/ConvexClientProvider'
+import ErrorBoundary from '@/components/ErrorBoundary'
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -24,12 +25,26 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  // Get Clerk publishable key with fallback
+  const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <ClerkProvider>
-          <ConvexClientProvider>{children}</ConvexClientProvider>
-        </ClerkProvider>
+        <ErrorBoundary>
+          {clerkPublishableKey ? (
+            <ClerkProvider publishableKey={clerkPublishableKey}>
+              <ConvexClientProvider>{children}</ConvexClientProvider>
+            </ClerkProvider>
+          ) : (
+            <div className="p-4 text-center">
+              <p className="text-red-500">
+                Missing Clerk configuration. Please check your environment variables.
+              </p>
+              <ConvexClientProvider>{children}</ConvexClientProvider>
+            </div>
+          )}
+        </ErrorBoundary>
       </body>
     </html>
   )
