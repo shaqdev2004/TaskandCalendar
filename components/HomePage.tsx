@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { Button } from "@/components/ui/button"
@@ -12,9 +12,17 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CalendarDays, Clock, MapPin, FileText, AlertCircle, Edit, Plus, Search, Loader2, Trash2 } from "lucide-react"
+import { CalendarDays, Clock, MapPin, FileText, AlertCircle, Edit, Plus, Search, Loader2, Trash2, Mic, MicOff } from "lucide-react"
 import type { Task } from "@/lib/task-types"
 import { parseTasks } from "@/lib/ai-parser"
+import { GoogleCalendarSync } from "@/components/GoogleCalendarSync"
+
+// Declare a global interface to add the webkitSpeechRecognition property to the Window object
+declare global {
+  interface Window {
+    webkitSpeechRecognition: any;
+  }
+}
 
 interface EditingTask {
   title: string
@@ -41,6 +49,11 @@ export function HomePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [prompt, setPrompt] = useState("")
+
+  // Voice recognition state
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingComplete, setRecordingComplete] = useState(false)
+  const recognitionRef = useRef<any>(null)
 
   // Task management state
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
@@ -71,6 +84,81 @@ export function HomePage() {
     isAllDay: false
   })
 
+  // Voice recognition functions
+  const startRecording = () => {
+    setIsRecording(true)
+    setRecordingComplete(false)
+    setError(null)
+    
+    // Create a new SpeechRecognition instance and configure it
+    recognitionRef.current = new window.webkitSpeechRecognition()
+    recognitionRef.current.continuous = true
+    recognitionRef.current.interimResults = true
+
+    // Store the current prompt text when starting recording
+    const currentText = prompt
+
+    // Event handler for speech recognition results
+    recognitionRef.current.onresult = (event: any) => {
+      const { transcript } = event.results[event.results.length - 1][0]
+      
+      // Append new transcript to existing text with proper spacing
+      const separator = currentText.trim() ? (currentText.trim().endsWith('.') || currentText.trim().endsWith(',') ? ' ' : ', ') : ''
+      setPrompt(currentText + separator + transcript)
+    }
+
+    // Handle errors
+    recognitionRef.current.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error)
+      setError(`Speech recognition error: ${event.error}`)
+      setIsRecording(false)
+    }
+
+    // Handle end of recognition
+    recognitionRef.current.onend = () => {
+      setIsRecording(false)
+      setRecordingComplete(true)
+    }
+
+    // Start the speech recognition
+    try {
+      recognitionRef.current.start()
+    } catch (err) {
+      console.error('Error starting speech recognition:', err)
+      setError('Could not start speech recognition. Please check your microphone permissions.')
+      setIsRecording(false)
+    }
+  }
+
+  const stopRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+      setRecordingComplete(true)
+    }
+  }
+
+  const handleToggleRecording = () => {
+    if (!isRecording) {
+      // Check if speech recognition is supported
+      if (!window.webkitSpeechRecognition) {
+        setError('Speech recognition is not supported in this browser. Please try Chrome or Edge.')
+        return
+      }
+      startRecording()
+    } else {
+      stopRecording()
+    }
+  }
+
+  // Cleanup effect when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+    }
+  }, [])
+
   // Task parsing function
   const handleParsePrompt = async () => {
     if (!prompt.trim()) return
@@ -85,6 +173,7 @@ export function HomePage() {
       // Save tasks to Convex database
       await createTasks({ tasks: parsedTasks })
       setPrompt("") // Clear the prompt after successful creation
+      setRecordingComplete(false) // Reset recording state
     } catch (err) {
       console.error("Error parsing tasks:", err)
       setError(err instanceof Error ? err.message : "An error occurred")
@@ -237,7 +326,7 @@ export function HomePage() {
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">Home</h1>
         <p className="text-muted-foreground">
-          Parse tasks from natural language and manage your task list
+          Parse tasks from natural language using text or voice input
         </p>
       </div>
 
@@ -252,14 +341,55 @@ export function HomePage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="prompt">Describe your tasks in natural language</Label>
-            <Textarea
-              id="prompt"
-              placeholder="Example: Meeting with John tomorrow at 2pm, grocery shopping on Friday, call mom this weekend..."
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="min-h-[100px]"
-            />
+            <div className="relative">
+              <Textarea
+                id="prompt"
+                placeholder="Example: Meeting with John tomorrow at 2pm, grocery shopping on Friday, call mom this weekend..."
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="min-h-[100px] pr-16"
+              />
+              
+              {/* Voice Recording Button */}
+              <div className="absolute top-2 right-2 flex flex-col items-center gap-2">
+                <Button
+                  type="button"
+                  variant={isRecording ? "destructive" : "outline"}
+                  size="sm"
+                  onClick={handleToggleRecording}
+                  className={`p-2 ${isRecording ? 'animate-pulse' : ''}`}
+                  title={isRecording ? "Stop recording" : "Start voice input"}
+                >
+                  {isRecording ? (
+                    <MicOff className="h-4 w-4" />
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
+                </Button>
+                
+                {/* Recording status indicator */}
+                {isRecording && (
+                  <div className="text-xs text-red-600 font-medium">
+                    Recording...
+                  </div>
+                )}
+                
+                {recordingComplete && !isRecording && prompt && (
+                  <div className="text-xs text-green-600 font-medium">
+                    Voice recorded
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Instructions */}
+            <p className="text-sm text-muted-foreground">
+              {isRecording 
+                ? "Speak clearly to add your tasks. Click the microphone again to stop recording."
+                : "Type your tasks or click the microphone button to use voice input. Each new recording will be appended to your existing text."
+              }
+            </p>
           </div>
           
           {error && (
@@ -285,6 +415,15 @@ export function HomePage() {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Google Calendar Integration */}
+      <GoogleCalendarSync
+        tasks={tasks || []}
+        onTaskUpdate={(taskId, updates) => {
+          // Refresh tasks after update
+          // The useMutation will automatically update the UI
+        }}
+      />
 
       {/* Task Management Section */}
       <Card>
@@ -386,6 +525,11 @@ export function HomePage() {
                           className="text-xs"
                         >
                           {task.priority}
+                        </Badge>
+                      )}
+                      {task.googleEventId && (
+                        <Badge variant="default" className="text-xs">
+                          Synced
                         </Badge>
                       )}
                     </div>

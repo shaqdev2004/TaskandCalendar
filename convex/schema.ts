@@ -1,21 +1,33 @@
+// convex/schema.ts
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
   tasks: defineTable({
+    userId: v.string(),
     title: v.string(),
-    date: v.string(), // YYYY-MM-DD format
-    startTime: v.string(), // HH:MM format
-    endTime: v.optional(v.string()), // HH:MM format
+    date: v.string(),
+    startTime: v.string(),
+    endTime: v.optional(v.string()),
     duration: v.optional(v.string()),
     location: v.optional(v.string()),
     description: v.optional(v.string()),
-    category: v.optional(v.string()),
-    priority: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
     notes: v.optional(v.string()),
+    priority: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
+    category: v.optional(v.string()),
     isAllDay: v.optional(v.boolean()),
-    userId: v.string(), // To associate tasks with users
-  })
-    .index("by_user", ["userId"])
-    .index("by_user_and_date", ["userId", "date"]),
+    // New Google Calendar fields
+    googleEventId: v.optional(v.string()),
+    lastSyncedAt: v.optional(v.string()),
+    syncStatus: v.optional(v.union(v.literal("pending"), v.literal("synced"), v.literal("error"))),
+  }).index("by_user", ["userId"]),
+  
+  // Optional: Store user Google tokens (consider encryption in production)
+  userTokens: defineTable({
+    userId: v.string(),
+    provider: v.string(),
+    accessToken: v.string(),
+    refreshToken: v.optional(v.string()),
+    expiresAt: v.optional(v.number()),
+  }).index("by_user_provider", ["userId", "provider"]),
 });

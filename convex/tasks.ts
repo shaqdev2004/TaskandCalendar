@@ -57,6 +57,7 @@ export const createTask = mutation({
     priority: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
     notes: v.optional(v.string()),
     isAllDay: v.optional(v.boolean()),
+    googleEventId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -67,6 +68,8 @@ export const createTask = mutation({
     return await ctx.db.insert("tasks", {
       ...args,
       userId: identity.subject,
+      syncStatus: args.googleEventId ? "synced" : "pending",
+      lastSyncedAt: args.googleEventId ? new Date().toISOString() : undefined,
     });
   },
 });
@@ -122,21 +125,30 @@ export const updateTask = mutation({
     priority: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
     notes: v.optional(v.string()),
     isAllDay: v.optional(v.boolean()),
+    googleEventId: v.optional(v.string()),
+    syncStatus: v.optional(v.union(v.literal("pending"), v.literal("synced"), v.literal("error"))),
+    lastSyncedAt: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated");
     }
-    
+
     const { id, ...updates } = args;
-    
+
     // Verify the task belongs to the current user
     const task = await ctx.db.get(id);
     if (!task || task.userId !== identity.subject) {
       throw new Error("Task not found or access denied");
     }
-    
+
+    // If googleEventId is being set, update sync status
+    if (updates.googleEventId) {
+      updates.syncStatus = "synced";
+      updates.lastSyncedAt = new Date().toISOString();
+    }
+
     return await ctx.db.patch(id, updates);
   },
 });
@@ -159,5 +171,45 @@ export const deleteTask = mutation({
     }
     
     return await ctx.db.delete(args.id);
+  },
+});
+
+// Store user tokens securely (optional - you might prefer client-side storage)
+export const storeUserToken = mutation({
+  args: {
+    userId: v.string(),
+    provider: v.string(),
+    accessToken: v.string(),
+    refreshToken: v.optional(v.string()),
+    expiresAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("userTokens")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", args.userId).eq("provider", args.provider)
+      )
+      .first();
+
+    if (existing) {
+      return await ctx.db.patch(existing._id, args);
+    } else {
+      return await ctx.db.insert("userTokens", args);
+    }
+  },
+});
+
+export const getUserToken = query({
+  args: {
+    userId: v.string(),
+    provider: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("userTokens")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", args.userId).eq("provider", args.provider)
+      )
+      .first();
   },
 });
