@@ -63,7 +63,12 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
 
       const googleCalendar = new GoogleCalendarAPI(accessToken)
       const unsyncedTasks = tasks.filter(task => !task.googleEventId && task.syncStatus !== 'synced')
-      
+
+      console.log('Starting sync process...')
+      console.log('Total tasks:', tasks.length)
+      console.log('Unsynced tasks:', unsyncedTasks.length)
+      console.log('Unsynced tasks data:', unsyncedTasks)
+
       let syncedCount = 0
       let errorCount = 0
 
@@ -73,12 +78,14 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
           const createdEvent = await googleCalendar.createEvent(googleEvent)
           
           // Update task in Convex with Google Calendar event ID
-          await updateTask({
-            id: task._id as any,
-            googleEventId: createdEvent.id,
-            syncStatus: 'synced',
-            lastSyncedAt: new Date().toISOString()
-          })
+          if (task._id) {
+            await updateTask({
+              id: task._id,
+              googleEventId: createdEvent.id,
+              syncStatus: 'synced',
+              lastSyncedAt: new Date().toISOString()
+            })
+          }
 
           // Update local state if callback provided
           if (onTaskUpdate) {
@@ -92,16 +99,23 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
           syncedCount++
         } catch (error) {
           console.error(`Failed to sync task ${task.title}:`, error)
-          
-          // Update task with error status
-          await updateTask({
-            id: task._id as any,
-            syncStatus: 'error',
-            lastSyncedAt: new Date().toISOString()
-          })
+          console.error('Task data:', task)
 
-          if (onTaskUpdate) {
-            onTaskUpdate(task._id!, {
+          // Update task with error status
+          try {
+            if (task._id) {
+              await updateTask({
+                id: task._id,
+                syncStatus: 'error',
+                lastSyncedAt: new Date().toISOString()
+              })
+            }
+          } catch (updateError) {
+            console.error('Failed to update task with error status:', updateError)
+          }
+
+          if (onTaskUpdate && task._id) {
+            onTaskUpdate(task._id, {
               syncStatus: 'error',
               lastSyncedAt: new Date().toISOString()
             })
