@@ -13,9 +13,10 @@ import { Task } from '@/lib/task-types'
 interface GoogleCalendarSyncProps {
   tasks: Task[]
   onTaskUpdate?: (taskId: string, updates: Partial<Task>) => void
+  onTaskDelete?: (taskId: string, googleEventId?: string) => void
 }
 
-export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncProps) {
+export function GoogleCalendarSync({ tasks, onTaskUpdate, onTaskDelete }: GoogleCalendarSyncProps) {
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
@@ -45,7 +46,7 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
     window.location.href = authUrl
   }
 
-  const syncTasksToGoogleCalendar = async () => {
+  const syncChangesToGoogleCalendar = async () => {
     if (!isConnected) {
       connectToGoogleCalendar()
       return
@@ -53,7 +54,7 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
 
     setIsLoading(true)
     setSyncStatus('syncing')
-    setSyncMessage('Syncing tasks to Google Calendar...')
+    setSyncMessage('Syncing changes to Google Calendar...')
 
     try {
       const accessToken = localStorage.getItem('google_access_token')
@@ -62,22 +63,37 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
       }
 
       const googleCalendar = new GoogleCalendarAPI(accessToken)
-      const unsyncedTasks = tasks.filter(task => !task.googleEventId && task.syncStatus !== 'synced')
 
-      console.log('Starting sync process...')
+      // Get tasks that need different types of syncing
+      const newTasks = tasks.filter(task =>
+        !task.googleEventId &&
+        (task.syncStatus === 'pending' || task.syncStatus === 'error' || !task.syncStatus)
+      )
+      const updatedTasks = tasks.filter(task =>
+        task.googleEventId &&
+        task.syncStatus === 'pending'
+      )
+      const errorTasks = tasks.filter(task =>
+        task.syncStatus === 'error' &&
+        task.googleEventId
+      )
+
+      console.log('Starting sync changes process...')
       console.log('Total tasks:', tasks.length)
-      console.log('Unsynced tasks:', unsyncedTasks.length)
-      console.log('Unsynced tasks data:', unsyncedTasks)
+      console.log('New tasks to create:', newTasks.length)
+      console.log('Updated tasks to sync:', updatedTasks.length)
+      console.log('Error tasks to retry:', errorTasks.length)
 
-      let syncedCount = 0
+      let createdCount = 0
+      let updatedCount = 0
       let errorCount = 0
 
-      for (const task of unsyncedTasks) {
+      // Handle new tasks (create events)
+      for (const task of newTasks) {
         try {
           const googleEvent = taskToGoogleEvent(task)
           const createdEvent = await googleCalendar.createEvent(googleEvent)
-          
-          // Update task in Convex with Google Calendar event ID
+
           if (task._id) {
             await updateTask({
               id: task._id,
@@ -87,56 +103,115 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
             })
           }
 
-          // Update local state if callback provided
-          if (onTaskUpdate) {
-            onTaskUpdate(task._id!, {
+          if (onTaskUpdate && task._id) {
+            onTaskUpdate(task._id, {
               googleEventId: createdEvent.id,
               syncStatus: 'synced',
               lastSyncedAt: new Date().toISOString()
             })
           }
 
-          syncedCount++
+          createdCount++
         } catch (error) {
-          console.error(`Failed to sync task ${task.title}:`, error)
-          console.error('Task data:', task)
-
-          // Update task with error status
-          try {
-            if (task._id) {
-              await updateTask({
-                id: task._id,
-                syncStatus: 'error',
-                lastSyncedAt: new Date().toISOString()
-              })
-            }
-          } catch (updateError) {
-            console.error('Failed to update task with error status:', updateError)
-          }
-
-          if (onTaskUpdate && task._id) {
-            onTaskUpdate(task._id, {
-              syncStatus: 'error',
-              lastSyncedAt: new Date().toISOString()
-            })
-          }
-
+          console.error(`Failed to create event for task ${task.title}:`, error)
+          await handleSyncError(task, error)
           errorCount++
         }
       }
 
-      if (errorCount === 0) {
+      // Handle updated tasks (update existing events)
+      for (const task of updatedTasks) {
+        try {
+          if (task.googleEventId) {
+            const googleEvent = taskToGoogleEvent(task)
+            await googleCalendar.updateEvent(task.googleEventId, googleEvent)
+
+            if (task._id) {
+              await updateTask({
+                id: task._id,
+                syncStatus: 'synced',
+                lastSyncedAt: new Date().toISOString()
+              })
+            }
+
+            if (onTaskUpdate && task._id) {
+              onTaskUpdate(task._id, {
+                syncStatus: 'synced',
+                lastSyncedAt: new Date().toISOString()
+              })
+            }
+
+            updatedCount++
+          }
+        } catch (error) {
+          console.error(`Failed to update event for task ${task.title}:`, error)
+          await handleSyncError(task, error)
+          errorCount++
+        }
+      }
+
+      // Handle error tasks (retry)
+      for (const task of errorTasks) {
+        try {
+          if (task.googleEventId) {
+            // Try to update existing event
+            const googleEvent = taskToGoogleEvent(task)
+            await googleCalendar.updateEvent(task.googleEventId, googleEvent)
+            updatedCount++
+          } else {
+            // Try to create new event
+            const googleEvent = taskToGoogleEvent(task)
+            const createdEvent = await googleCalendar.createEvent(googleEvent)
+
+            if (task._id) {
+              await updateTask({
+                id: task._id,
+                googleEventId: createdEvent.id,
+                syncStatus: 'synced',
+                lastSyncedAt: new Date().toISOString()
+              })
+            }
+            createdCount++
+          }
+
+          if (task._id) {
+            await updateTask({
+              id: task._id,
+              syncStatus: 'synced',
+              lastSyncedAt: new Date().toISOString()
+            })
+          }
+
+          if (onTaskUpdate && task._id) {
+            onTaskUpdate(task._id, {
+              syncStatus: 'synced',
+              lastSyncedAt: new Date().toISOString()
+            })
+          }
+        } catch (error) {
+          console.error(`Failed to retry sync for task ${task.title}:`, error)
+          await handleSyncError(task, error)
+          errorCount++
+        }
+      }
+
+      // Generate success message
+      const totalProcessed = createdCount + updatedCount
+      if (errorCount === 0 && totalProcessed > 0) {
         setSyncStatus('success')
-        setSyncMessage(`Successfully synced ${syncedCount} tasks to Google Calendar!`)
-      } else {
+        setSyncMessage(`Successfully synced ${totalProcessed} changes (${createdCount} created, ${updatedCount} updated)`)
+      } else if (totalProcessed > 0) {
         setSyncStatus('error')
-        setSyncMessage(`Synced ${syncedCount} tasks, ${errorCount} failed. Check console for details.`)
+        setSyncMessage(`Synced ${totalProcessed} changes, ${errorCount} failed. Check console for details.`)
+      } else {
+        setSyncStatus('success')
+        setSyncMessage('All tasks are already up to date!')
       }
 
     } catch (error) {
       console.error('Sync error:', error)
       setSyncStatus('error')
-      setSyncMessage(error instanceof Error ? error.message : 'Failed to sync tasks')
+      setSyncMessage(error instanceof Error ? error.message : 'Failed to sync changes')
     } finally {
       setIsLoading(false)
       setTimeout(() => {
@@ -144,6 +219,43 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
         setSyncMessage('')
       }, 5000)
     }
+  }
+
+  const handleSyncError = async (task: Task, error: any) => {
+    console.error('Task data:', task)
+
+    try {
+      if (task._id) {
+        await updateTask({
+          id: task._id,
+          syncStatus: 'error',
+          lastSyncedAt: new Date().toISOString()
+        })
+      }
+    } catch (updateError) {
+      console.error('Failed to update task with error status:', updateError)
+    }
+
+    if (onTaskUpdate && task._id) {
+      onTaskUpdate(task._id, {
+        syncStatus: 'error',
+        lastSyncedAt: new Date().toISOString()
+      })
+    }
+  }
+
+  const deleteTaskFromGoogleCalendar = async (googleEventId: string) => {
+    if (!isConnected) {
+      throw new Error('Google Calendar not connected')
+    }
+
+    const accessToken = localStorage.getItem('google_access_token')
+    if (!accessToken) {
+      throw new Error('No access token found')
+    }
+
+    const googleCalendar = new GoogleCalendarAPI(accessToken)
+    await googleCalendar.deleteEvent(googleEventId)
   }
 
   const disconnectGoogleCalendar = () => {
@@ -154,9 +266,17 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
     setSyncMessage('')
   }
 
-  const unsyncedTasks = tasks.filter(task => !task.googleEventId && task.syncStatus !== 'synced')
-  const syncedTasks = tasks.filter(task => task.googleEventId && task.syncStatus === 'synced')
+  const newTasks = tasks.filter(task =>
+    !task.googleEventId &&
+    (task.syncStatus === 'pending' || task.syncStatus === 'error' || !task.syncStatus)
+  )
+  const updatedTasks = tasks.filter(task =>
+    task.googleEventId &&
+    task.syncStatus === 'pending'
+  )
+  const syncedTasks = tasks.filter(task => task.syncStatus === 'synced')
   const errorTasks = tasks.filter(task => task.syncStatus === 'error')
+  const totalChanges = newTasks.length + updatedTasks.length + errorTasks.length
 
   return (
     <Card className="posthog-card">
@@ -164,7 +284,7 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-brand-blue" />
-            <CardTitle className="text-foreground">Google Calendar Sync</CardTitle>
+            <CardTitle className="text-foreground">Google Calendar Changes</CardTitle>
           </div>
           <div className="flex items-center gap-2">
             {isConnected ? (
@@ -181,7 +301,7 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
           {!isConnected ? (
             <div className="space-y-2">
               <p className="text-muted-foreground text-sm">
-                Connect your Google Calendar to automatically sync your tasks as events.
+                Connect your Google Calendar to sync task changes automatically.
               </p>
               <Button 
                 onClick={connectToGoogleCalendar}
@@ -196,7 +316,7 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-muted-foreground text-sm">
-                  Your Google Calendar is connected and ready to sync.
+                  Your Google Calendar is connected. Task changes can be synced on demand.
                 </p>
                 <Button 
                   variant="outline" 
@@ -209,14 +329,18 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
               </div>
 
               {/* Sync Statistics */}
-              <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="grid grid-cols-4 gap-3 text-center">
                 <div className="space-y-1">
                   <div className="text-2xl font-bold text-brand-blue">{syncedTasks.length}</div>
                   <div className="text-xs text-muted-foreground">Synced</div>
                 </div>
                 <div className="space-y-1">
-                  <div className="text-2xl font-bold text-brand-yellow">{unsyncedTasks.length}</div>
-                  <div className="text-xs text-muted-foreground">Pending</div>
+                  <div className="text-2xl font-bold text-green-600">{newTasks.length}</div>
+                  <div className="text-xs text-muted-foreground">New</div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-2xl font-bold text-brand-yellow">{updatedTasks.length}</div>
+                  <div className="text-xs text-muted-foreground">Updated</div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-2xl font-bold text-brand-red">{errorTasks.length}</div>
@@ -224,21 +348,26 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate }: GoogleCalendarSyncPr
                 </div>
               </div>
 
-              {/* Sync Button */}
-              <Button 
-                onClick={syncTasksToGoogleCalendar}
-                disabled={isLoading || unsyncedTasks.length === 0}
+              {/* Sync Changes Button */}
+              <Button
+                onClick={syncChangesToGoogleCalendar}
+                disabled={isLoading || totalChanges === 0}
                 className="w-full posthog-button-secondary posthog-focus"
               >
                 {isLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Syncing...
+                    Syncing Changes...
+                  </>
+                ) : totalChanges > 0 ? (
+                  <>
+                    <Calendar className="h-4 w-4 mr-2" />
+                    Sync {totalChanges} Changes
                   </>
                 ) : (
                   <>
                     <Calendar className="h-4 w-4 mr-2" />
-                    Sync {unsyncedTasks.length} Tasks
+                    All Changes Synced
                   </>
                 )}
               </Button>

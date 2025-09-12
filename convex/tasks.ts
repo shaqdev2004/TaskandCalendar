@@ -58,6 +58,7 @@ export const createTask = mutation({
     notes: v.optional(v.string()),
     isAllDay: v.optional(v.boolean()),
     googleEventId: v.optional(v.string()),
+    syncStatus: v.optional(v.union(v.literal("pending"), v.literal("synced"), v.literal("error"))),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -89,6 +90,7 @@ export const createTasks = mutation({
       priority: v.optional(v.union(v.literal("low"), v.literal("medium"), v.literal("high"))),
       notes: v.optional(v.string()),
       isAllDay: v.optional(v.boolean()),
+      syncStatus: v.optional(v.union(v.literal("pending"), v.literal("synced"), v.literal("error"))),
     })),
   },
   handler: async (ctx, args) => {

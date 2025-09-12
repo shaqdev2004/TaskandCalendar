@@ -16,6 +16,7 @@ import { CalendarDays, Clock, MapPin, FileText, AlertCircle, Edit, Plus, Search,
 import type { Task } from "@/lib/task-types"
 import { parseTasks } from "@/lib/ai-parser"
 import { GoogleCalendarSync } from "@/components/GoogleCalendarSync"
+import { useGoogleCalendarSync } from "@/hooks/useGoogleCalendarSync"
 
 // Declare a global interface to add the webkitSpeechRecognition property to the Window object
 declare global {
@@ -44,6 +45,9 @@ export function HomePage() {
   const createTask = useMutation(api.tasks.createTask)
   const updateTask = useMutation(api.tasks.updateTask)
   const deleteTask = useMutation(api.tasks.deleteTask)
+
+  // Google Calendar sync hook
+  const { syncNewTask, syncTaskUpdate, syncTaskDeletion, markTaskForSync } = useGoogleCalendarSync()
 
   // Local state for task parsing
   const [loading, setLoading] = useState(false)
@@ -170,8 +174,15 @@ export function HomePage() {
       const parsedTasks = await parseTasks(prompt)
       console.log("Parsed Tasks:", parsedTasks)
 
+      // Mark all parsed tasks as pending for sync
+      const tasksWithSyncStatus = parsedTasks.map(task => ({
+        ...task,
+        syncStatus: 'pending' as const
+      }))
+
       // Save tasks to Convex database
-      await createTasks({ tasks: parsedTasks })
+      await createTasks({ tasks: tasksWithSyncStatus })
+
       setPrompt("") // Clear the prompt after successful creation
       setRecordingComplete(false) // Reset recording state
     } catch (err) {
@@ -245,7 +256,20 @@ export function HomePage() {
 
     try {
       for (const taskId of selectedTasks) {
+        // Find the task to get Google Calendar event ID
+        const task = tasks.find(t => t._id === taskId)
+
+        // Delete from Convex
         await deleteTask({ id: taskId as any })
+
+        // Delete from Google Calendar if it exists
+        if (task?.googleEventId) {
+          try {
+            await syncTaskDeletion(task.googleEventId)
+          } catch (syncError) {
+            console.warn(`Failed to delete Google Calendar event for task ${task.title}:`, syncError)
+          }
+        }
       }
       setSelectedTasks(new Set())
     } catch (err) {
@@ -281,11 +305,25 @@ export function HomePage() {
     }
   }
 
+  const handleTaskUpdate = async (taskId: string, updates: Partial<Task>) => {
+    try {
+      await updateTask({ id: taskId as any, ...updates })
+
+      // Mark task for sync if it has a Google Calendar event
+      const task = tasks.find(t => t._id === taskId)
+      if (task?.googleEventId) {
+        await markTaskForSync(taskId)
+      }
+    } catch (err) {
+      console.error("Error updating task:", err)
+    }
+  }
+
   const handleCreateTask = async () => {
     if (!newTask.title.trim()) return
 
     try {
-      await createTask({
+      const taskData = {
         title: newTask.title,
         date: newTask.date || new Date().toISOString().split('T')[0],
         startTime: newTask.startTime || "09:00",
@@ -296,8 +334,11 @@ export function HomePage() {
         notes: newTask.notes,
         priority: newTask.priority || "medium",
         category: newTask.category,
-        isAllDay: newTask.isAllDay || false
-      })
+        isAllDay: newTask.isAllDay || false,
+        syncStatus: 'pending' // Mark for sync instead of auto-syncing
+      }
+
+      await createTask(taskData)
 
       // Reset form and close dialog
       setNewTask({
@@ -341,54 +382,18 @@ export function HomePage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="prompt">Describe your tasks in natural language</Label>
-            <div className="relative">
-              <Textarea
-                id="prompt"
-                placeholder="Example: Meeting with John tomorrow at 2pm, grocery shopping on Friday, call mom this weekend..."
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={handleKeyDown}
-                className="min-h-[100px] pr-16"
-              />
-              
-              {/* Voice Recording Button */}
-              <div className="absolute top-2 right-2 flex flex-col items-center gap-2">
-                <Button
-                  type="button"
-                  variant={isRecording ? "destructive" : "outline"}
-                  size="sm"
-                  onClick={handleToggleRecording}
-                  className={`p-2 ${isRecording ? 'animate-pulse' : ''}`}
-                  title={isRecording ? "Stop recording" : "Start voice input"}
-                >
-                  {isRecording ? (
-                    <MicOff className="h-4 w-4" />
-                  ) : (
-                    <Mic className="h-4 w-4" />
-                  )}
-                </Button>
-                
-                {/* Recording status indicator */}
-                {isRecording && (
-                  <div className="text-xs text-red-600 font-medium">
-                    Recording...
-                  </div>
-                )}
-                
-                {recordingComplete && !isRecording && prompt && (
-                  <div className="text-xs text-green-600 font-medium">
-                    Voice recorded
-                  </div>
-                )}
-              </div>
-            </div>
+            <Textarea
+              id="prompt"
+              placeholder="Example: Meeting with John tomorrow at 2pm, grocery shopping on Friday, call mom this weekend..."
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="min-h-[100px]"
+            />
             
             {/* Instructions */}
             <p className="text-sm text-muted-foreground">
-              {isRecording 
-                ? "Speak clearly to add your tasks. Click the microphone again to stop recording."
-                : "Type your tasks or click the microphone button to use voice input. Each new recording will be appended to your existing text."
-              }
+              Type your tasks above or use the voice input button below to speak your tasks naturally.
             </p>
           </div>
           
@@ -399,30 +404,66 @@ export function HomePage() {
             </div>
           )}
           
-          <Button 
-            onClick={handleParsePrompt} 
-            disabled={loading || !prompt.trim()}
-            className="w-full"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Parsing Tasks...
-              </>
-            ) : (
-              "Parse Tasks"
-            )}
-          </Button>
+          {/* Main Action Buttons */}
+          <div className="space-y-3">
+            <Button
+              onClick={handleParsePrompt}
+              disabled={loading || !prompt.trim()}
+              className="w-full"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Parsing Tasks...
+                </>
+              ) : (
+                "Parse Tasks"
+              )}
+            </Button>
+
+            {/* Main Voice Input Button */}
+            <div className="relative">
+              <Button
+                type="button"
+                variant={isRecording ? "destructive" : "secondary"}
+                onClick={handleToggleRecording}
+                className={`w-full ${isRecording ? 'animate-pulse' : ''}`}
+                disabled={loading}
+              >
+                {isRecording ? (
+                  <>
+                    <MicOff className="mr-2 h-4 w-4" />
+                    Stop Recording
+                  </>
+                ) : (
+                  <>
+                    <Mic className="mr-2 h-4 w-4" />
+                    Voice Input
+                  </>
+                )}
+              </Button>
+
+              {/* Recording status indicator */}
+              {isRecording && (
+                <div className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-xs text-red-600 font-medium animate-pulse">
+                  🎤 Listening...
+                </div>
+              )}
+
+              {recordingComplete && !isRecording && prompt && (
+                <div className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-xs text-green-600 font-medium">
+                  ✅ Voice recorded
+                </div>
+              )}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
       {/* Google Calendar Integration */}
       <GoogleCalendarSync
         tasks={tasks || []}
-        onTaskUpdate={(taskId, updates) => {
-          // Refresh tasks after update
-          // The useMutation will automatically update the UI
-        }}
+        onTaskUpdate={handleTaskUpdate}
       />
 
       {/* Task Management Section */}
