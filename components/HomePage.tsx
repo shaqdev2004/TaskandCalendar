@@ -93,22 +93,42 @@ export function HomePage() {
     setIsRecording(true)
     setRecordingComplete(false)
     setError(null)
-    
+
     // Create a new SpeechRecognition instance and configure it
     recognitionRef.current = new window.webkitSpeechRecognition()
     recognitionRef.current.continuous = true
     recognitionRef.current.interimResults = true
 
-    // Store the current prompt text when starting recording
-    const currentText = prompt
+    // Store the initial prompt text when starting recording
+    const initialText = prompt
+    let lastFinalTranscript = ''
 
     // Event handler for speech recognition results
     recognitionRef.current.onresult = (event: any) => {
-      const { transcript } = event.results[event.results.length - 1][0]
-      
-      // Append new transcript to existing text with proper spacing
-      const separator = currentText.trim() ? (currentText.trim().endsWith('.') || currentText.trim().endsWith(',') ? ' ' : ', ') : ''
-      setPrompt(currentText + separator + transcript)
+      let interimTranscript = ''
+      let finalTranscript = ''
+
+      // Process all results
+      for (let i = 0; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript
+        } else {
+          interimTranscript += transcript
+        }
+      }
+
+      // Only update if we have new final transcript
+      if (finalTranscript && finalTranscript !== lastFinalTranscript) {
+        lastFinalTranscript = finalTranscript
+
+        // Get current text and append new final transcript
+        setPrompt(prevPrompt => {
+          const currentText = prevPrompt || initialText
+          const separator = currentText.trim() ? (currentText.trim().endsWith('.') || currentText.trim().endsWith(',') ? ' ' : ', ') : ''
+          return currentText + separator + finalTranscript
+        })
+      }
     }
 
     // Handle errors
@@ -335,7 +355,7 @@ export function HomePage() {
         priority: newTask.priority || "medium",
         category: newTask.category,
         isAllDay: newTask.isAllDay || false,
-        syncStatus: 'pending' // Mark for sync instead of auto-syncing
+        syncStatus: 'pending' as const // Mark for sync instead of auto-syncing
       }
 
       await createTask(taskData)
