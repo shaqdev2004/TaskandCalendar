@@ -1,6 +1,10 @@
 import { clerkMiddleware } from '@clerk/nextjs/server';
 
-export default clerkMiddleware();
+export default clerkMiddleware(
+  {
+    authorizedParties: ['https://taskparser.com'],
+  }
+);
 
 export const config = {
   matcher: [
