@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Resend } from 'resend';
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,8 +32,16 @@ export async function POST(request: NextRequest) {
 
     // Simulate sending email (replace with actual email service)
     const emailData = {
+      from: 'onboarding@resend.dev', // You'll need to replace this with your verified domain
       to: 'shaqdev2004@gmail.com',
       subject: 'Google Calendar Access Request',
+      text: `Google Calendar Access Request
+
+User Email: ${email}
+Request Time: ${new Date().toLocaleString()}
+${message ? `Message: ${message}` : ''}
+
+This user is requesting access to Google Calendar sync functionality.`,
       html: `
         <h2>Google Calendar Access Request</h2>
         <p><strong>User Email:</strong> ${email}</p>
@@ -44,8 +53,8 @@ export async function POST(request: NextRequest) {
 
     // TODO: Replace this with actual email sending service
     // Example with Resend:
-    // const resend = new Resend(process.env.RESEND_API_KEY)
-    // await resend.emails.send(emailData)
+    const resend = new Resend(process.env.RESEND_API_KEY)
+    await resend.emails.send(emailData)
 
     // For development, we'll return success
     return NextResponse.json({
