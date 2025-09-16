@@ -21,7 +21,7 @@ export default defineSchema({
     lastSyncedAt: v.optional(v.string()),
     syncStatus: v.optional(v.union(v.literal("pending"), v.literal("synced"), v.literal("error"))),
   }).index("by_user", ["userId"]),
-  
+
   // Optional: Store user Google tokens (consider encryption in production)
   userTokens: defineTable({
     userId: v.string(),
@@ -30,4 +30,17 @@ export default defineSchema({
     refreshToken: v.optional(v.string()),
     expiresAt: v.optional(v.number()),
   }).index("by_user_provider", ["userId", "provider"]),
+
+  // Google Calendar access requests
+  calendarRequests: defineTable({
+    email: v.string(),
+    message: v.optional(v.string()),
+    status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    requestedAt: v.string(),
+    processedAt: v.optional(v.string()),
+    processedBy: v.optional(v.string()), // Admin user ID who processed the request
+    notes: v.optional(v.string()), // Admin notes
+  }).index("by_email", ["email"])
+    .index("by_status", ["status"])
+    .index("by_requested_at", ["requestedAt"]),
 });

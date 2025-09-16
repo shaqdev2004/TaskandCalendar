@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend';
+import { ConvexHttpClient } from "convex/browser"
+import { api } from "@/convex/_generated/api"
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,45 +22,36 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // For now, we'll just log the request
-    // In production, you would integrate with an email service like SendGrid, Resend, or Nodemailer
-    console.log('Google Calendar Access Request:', {
-      userEmail: email,
-      message: message || 'No additional message',
-      timestamp: new Date().toISOString(),
-      targetEmail: 'shaqdev2004@gmail.com'
-    })
+    // Initialize Convex client
+    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!)
 
-    // Simulate sending email (replace with actual email service)
-    const emailData = {
-      from: 'shaqdev2004@gmail.com', // You'll need to replace this with your verified domain
-      to: 'shaqdev2004@gmail.com',
-      subject: 'Google Calendar Access Request',
-      text: `Google Calendar Access Request
+    // Store the request in Convex database
+    try {
+      await convex.mutation(api.calendarRequests.createCalendarRequest, {
+        email: email,
+        message: message || undefined,
+      })
 
-User Email: ${email}
-Request Time: ${new Date().toLocaleString()}
-${message ? `Message: ${message}` : ''}
-
-This user is requesting access to Google Calendar sync functionality.`,
-      html: `
-        <h2>Google Calendar Access Request</h2>
-        <p><strong>User Email:</strong> ${email}</p>
-        <p><strong>Request Time:</strong> ${new Date().toLocaleString()}</p>
-        ${message ? `<p><strong>Message:</strong> ${message}</p>` : ''}
-        <p>This user is requesting access to Google Calendar sync functionality.</p>
-      `
+      console.log('Google Calendar Access Request stored:', {
+        userEmail: email,
+        message: message || 'No additional message',
+        timestamp: new Date().toISOString(),
+      })
+    } catch (convexError: any) {
+      // Handle duplicate request error
+      if (convexError.message?.includes('pending request already exists')) {
+        return NextResponse.json(
+          { error: 'A request for this email address is already pending. Please wait for approval.' },
+          { status: 409 }
+        )
+      }
+      throw convexError
     }
 
-    // TODO: Replace this with actual email sending service
-    // Example with Resend:
-    const resend = new Resend(process.env.RESEND_API_KEY)
-    await resend.emails.send(emailData)
-
-    // For development, we'll return success
+    // Return success response
     return NextResponse.json({
       success: true,
-      message: 'Request submitted successfully. You will be contacted soon!'
+      message: 'Your Google Calendar access request has been submitted successfully! We will review your request and get back to you soon.'
     })
 
   } catch (error) {
