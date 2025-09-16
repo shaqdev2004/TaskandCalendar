@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { Button } from "@/components/ui/button"
@@ -39,6 +40,8 @@ interface EditingTask {
 }
 
 export function HomePage() {
+  const searchParams = useSearchParams()
+
   // Convex hooks
   const tasks = useQuery(api.tasks.getTasks) ?? []
   const createTasks = useMutation(api.tasks.createTasks)
@@ -53,6 +56,19 @@ export function HomePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [prompt, setPrompt] = useState("")
+
+  // Handle voice input from URL parameters
+  useEffect(() => {
+    const voiceText = searchParams.get('voice')
+    if (voiceText) {
+      setPrompt(prev => {
+        const separator = prev.trim() ? (prev.trim().endsWith('.') || prev.trim().endsWith(',') ? ' ' : ', ') : ''
+        return prev + separator + voiceText
+      })
+      // Clear the URL parameter
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [searchParams])
 
   // Voice recognition state
   const [isRecording, setIsRecording] = useState(false)
@@ -509,22 +525,34 @@ export function HomePage() {
             />
           </div>
 
-          {/* Controls Row */}
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="select-all"
-                checked={selectedTasks.size === filteredAndSortedTasks.length && filteredAndSortedTasks.length > 0}
-                onCheckedChange={handleSelectAllTasks}
-              />
-              <Label htmlFor="select-all" className="text-sm font-medium">
-                Select all ({selectedTasks.size} selected)
-              </Label>
+          {/* Controls Row - Mobile Responsive */}
+          <div className="space-y-3 md:space-y-0">
+            {/* Select All and Delete Button Row */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="select-all"
+                  checked={selectedTasks.size === filteredAndSortedTasks.length && filteredAndSortedTasks.length > 0}
+                  onCheckedChange={handleSelectAllTasks}
+                />
+                <Label htmlFor="select-all" className="text-sm font-medium">
+                  Select all ({selectedTasks.size} selected)
+                </Label>
+              </div>
+
+              {selectedTasks.size > 0 && (
+                <Button variant="destructive" size="sm" onClick={handleBulkDelete} className="shrink-0">
+                  <Trash2 className="h-4 w-4 md:mr-2" />
+                  <span className="hidden sm:inline">Delete ({selectedTasks.size})</span>
+                  <span className="sm:hidden">({selectedTasks.size})</span>
+                </Button>
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Filters Row */}
+            <div className="flex items-center gap-2 justify-end">
               <Select value={sortBy} onValueChange={(value: "date" | "priority" | "title") => setSortBy(value)}>
-                <SelectTrigger className="w-32">
+                <SelectTrigger className="w-28 sm:w-32">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -535,7 +563,7 @@ export function HomePage() {
               </Select>
 
               <Select value={filterByTag} onValueChange={setFilterByTag}>
-                <SelectTrigger className="w-32">
+                <SelectTrigger className="w-28 sm:w-32">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -545,13 +573,6 @@ export function HomePage() {
                   ))}
                 </SelectContent>
               </Select>
-
-              {selectedTasks.size > 0 && (
-                <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete ({selectedTasks.size})
-                </Button>
-              )}
             </div>
           </div>
 
@@ -565,23 +586,37 @@ export function HomePage() {
               filteredAndSortedTasks.map((task, index) => (
                 <div
                   key={task._id}
-                  className="flex items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   <Checkbox
                     checked={selectedTasks.has(task._id || "")}
                     onCheckedChange={() => handleSelectTask(task._id || "")}
+                    className="mt-1"
                   />
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-medium truncate">{task.title}</h3>
+
+                  <div className="flex-1 min-w-0 space-y-2">
+                    {/* Title and Edit Button Row */}
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="font-medium text-sm sm:text-base leading-tight">{task.title}</h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditDialog(index)}
+                        className="shrink-0 h-8 w-8 p-0"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {/* Badges Row */}
+                    <div className="flex flex-wrap gap-1">
                       {task.category && (
                         <Badge variant="secondary" className="text-xs">
                           {task.category}
                         </Badge>
                       )}
                       {task.priority && task.priority !== "medium" && (
-                        <Badge 
+                        <Badge
                           variant={task.priority === "high" ? "destructive" : "outline"}
                           className="text-xs"
                         >
@@ -594,35 +629,30 @@ export function HomePage() {
                         </Badge>
                       )}
                     </div>
-                    
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
+
+                    {/* Details Row */}
+                    <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-gray-500">
                       <div className="flex items-center gap-1">
                         <CalendarDays className="h-3 w-3" />
-                        {new Date(task.date).toLocaleDateString()}
+                        <span className="truncate">{new Date(task.date).toLocaleDateString()}</span>
                       </div>
                       {task.startTime && (
                         <div className="flex items-center gap-1">
                           <Clock className="h-3 w-3" />
-                          {task.startTime}
-                          {task.endTime && ` - ${task.endTime}`}
+                          <span className="truncate">
+                            {task.startTime}
+                            {task.endTime && ` - ${task.endTime}`}
+                          </span>
                         </div>
                       )}
                       {task.location && (
-                        <div className="flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
-                          {task.location}
+                        <div className="flex items-center gap-1 min-w-0">
+                          <MapPin className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{task.location}</span>
                         </div>
                       )}
                     </div>
                   </div>
-                  
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => openEditDialog(index)}
-                  >
-                    <Edit className="h-4 w-4" />
-                  </Button>
                 </div>
               ))
             )}

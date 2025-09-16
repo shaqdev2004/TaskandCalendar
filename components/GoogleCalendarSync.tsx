@@ -4,7 +4,11 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Calendar, Loader2, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react'
+import { Calendar, Loader2, CheckCircle, AlertCircle, ExternalLink, Mail } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import { GoogleCalendarAPI, taskToGoogleEvent } from '@/lib/google-calendar'
 import { useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
@@ -21,6 +25,12 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate, onTaskDelete }: Google
   const [isLoading, setIsLoading] = useState(false)
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
   const [syncMessage, setSyncMessage] = useState('')
+
+  // Google Calendar request dialog state
+  const [isRequestDialogOpen, setIsRequestDialogOpen] = useState(false)
+  const [requestEmail, setRequestEmail] = useState('')
+  const [requestMessage, setRequestMessage] = useState('')
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false)
   
   const updateTask = useMutation(api.tasks.updateTask)
 
@@ -266,6 +276,52 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate, onTaskDelete }: Google
     setSyncMessage('')
   }
 
+  const handleRequestGoogleCalendar = async () => {
+    if (!requestEmail.trim()) {
+      setSyncMessage('Please enter your email address')
+      setSyncStatus('error')
+      return
+    }
+
+    setIsSubmittingRequest(true)
+
+    try {
+      const response = await fetch('/api/request-google-calendar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: requestEmail.trim(),
+          message: requestMessage.trim()
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setSyncStatus('success')
+        setSyncMessage(data.message || 'Request submitted successfully!')
+        setIsRequestDialogOpen(false)
+        setRequestEmail('')
+        setRequestMessage('')
+      } else {
+        setSyncStatus('error')
+        setSyncMessage(data.error || 'Failed to submit request')
+      }
+    } catch (error) {
+      console.error('Error submitting request:', error)
+      setSyncStatus('error')
+      setSyncMessage('Failed to submit request. Please try again.')
+    } finally {
+      setIsSubmittingRequest(false)
+      setTimeout(() => {
+        setSyncStatus('idle')
+        setSyncMessage('')
+      }, 5000)
+    }
+  }
+
   const newTasks = tasks.filter(task =>
     !task.googleEventId &&
     (task.syncStatus === 'pending' || task.syncStatus === 'error' || !task.syncStatus)
@@ -279,33 +335,45 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate, onTaskDelete }: Google
   const totalChanges = newTasks.length + updatedTasks.length + errorTasks.length
 
   return (
-    <Card className="posthog-card">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-brand-blue" />
-            <CardTitle className="text-foreground">Google Calendar Changes</CardTitle>
+    <>
+      <Card className="posthog-card">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-brand-blue" />
+              <CardTitle className="text-foreground">Google Calendar Changes</CardTitle>
+            </div>
+            <div className="flex items-center gap-2">
+              {isConnected ? (
+                <Badge className="bg-green-500 text-white">Connected</Badge>
+              ) : (
+                <Badge variant="secondary">Not Connected</Badge>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {isConnected ? (
-              <Badge className="bg-green-500 text-white">Connected</Badge>
-            ) : (
-              <Badge variant="secondary">Not Connected</Badge>
-            )}
-          </div>
-        </div>
-      </CardHeader>
+        </CardHeader>
       <CardContent className="space-y-4">
         {/* Connection Status */}
         <div className="space-y-2">
           {!isConnected ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <p className="text-muted-foreground text-sm">
                 Connect your Google Calendar to sync task changes automatically.
               </p>
-              <Button 
+
+              {/* Request Google Calendar Access Button */}
+              <Button
+                onClick={() => setIsRequestDialogOpen(true)}
+                variant="outline"
+                className="w-full posthog-focus"
+              >
+                <Mail className="h-4 w-4 mr-2" />
+                Request Google Calendar Access
+              </Button>
+
+              <Button
                 onClick={connectToGoogleCalendar}
-                className="posthog-button-primary posthog-focus"
+                className="w-full posthog-button-primary posthog-focus"
                 disabled={isLoading}
               >
                 <Calendar className="h-4 w-4 mr-2" />
@@ -409,5 +477,66 @@ export function GoogleCalendarSync({ tasks, onTaskUpdate, onTaskDelete }: Google
         </div>
       </CardContent>
     </Card>
+
+    {/* Google Calendar Request Dialog */}
+    <Dialog open={isRequestDialogOpen} onOpenChange={setIsRequestDialogOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Request Google Calendar Access</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="request-email">Your Email Address</Label>
+            <Input
+              id="request-email"
+              type="email"
+              placeholder="your.email@example.com"
+              value={requestEmail}
+              onChange={(e) => setRequestEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="request-message">Additional Message (Optional)</Label>
+            <Textarea
+              id="request-message"
+              placeholder="Tell us why you'd like Google Calendar access..."
+              value={requestMessage}
+              onChange={(e) => setRequestMessage(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            We'll review your request and contact you with Google Calendar access instructions.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setIsRequestDialogOpen(false)}
+            disabled={isSubmittingRequest}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleRequestGoogleCalendar}
+            disabled={isSubmittingRequest || !requestEmail.trim()}
+          >
+            {isSubmittingRequest ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Submitting...
+              </>
+            ) : (
+              <>
+                <Mail className="h-4 w-4 mr-2" />
+                Submit Request
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

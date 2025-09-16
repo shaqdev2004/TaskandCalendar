@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { FloatingVoiceButton } from "@/components/FloatingVoiceButton"
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -92,6 +93,9 @@ export function AppLayout({ children }: AppLayoutProps) {
             {children}
           </div>
         </SidebarInset>
+
+        {/* Floating Voice Button for Mobile */}
+        <FloatingVoiceButton />
       </SignedIn>
     </>
   )

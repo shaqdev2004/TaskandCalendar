@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
 import { WeeklyCalendar } from "@/components/ui/taskCalendar"
@@ -40,6 +40,17 @@ export function CalendarPage() {
   const [editingTaskIndex, setEditingTaskIndex] = useState<number | null>(null)
   const [taskToDelete, setTaskToDelete] = useState<{ index: number; task: Task } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Task update handler for drag and drop
   const handleTaskUpdate = async (taskId: string, updates: Partial<Task>) => {
@@ -153,6 +164,7 @@ export function CalendarPage() {
           onTaskEdit={openEditDialog}
           onTaskDelete={openDeleteDialog}
           weekStartDate={weekStartDate}
+          isMobile={isMobile}
         />
       </div>
 

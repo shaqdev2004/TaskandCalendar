@@ -29,6 +29,7 @@ interface WeeklyCalendarProps {
   onTaskEdit?: (taskIndex: number) => void
   onTaskDelete?: (taskIndex: number) => void
   weekStartDate?: Date // Added weekStartDate prop to control which week to display
+  isMobile?: boolean // Add mobile prop to control view
 }
 
 interface DragState {
@@ -130,8 +131,9 @@ const addMinutesToTime = (time: string, minutes: number): string => {
 
 // Removed EditingTask interface - no longer needed since editing moved to parent
 
-export function WeeklyCalendar({ tasks = [], onTaskUpdate, onTaskEdit, onTaskDelete, weekStartDate }: WeeklyCalendarProps) {
+export function WeeklyCalendar({ tasks = [], onTaskUpdate, onTaskEdit, onTaskDelete, weekStartDate, isMobile }: WeeklyCalendarProps) {
   const [currentWeek, setCurrentWeek] = useState(new Date())
+  const [mobileStartDay, setMobileStartDay] = useState(0) // Track which day to start showing on mobile
 
   useEffect(() => {
     if (weekStartDate) {
@@ -143,6 +145,20 @@ export function WeeklyCalendar({ tasks = [], onTaskUpdate, onTaskEdit, onTaskDel
     const now = new Date()
     return `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`
   })
+
+  // Detect mobile if not explicitly passed
+  const [isActuallyMobile, setIsActuallyMobile] = useState(isMobile ?? false)
+
+  useEffect(() => {
+    if (isMobile === undefined) {
+      const checkMobile = () => {
+        setIsActuallyMobile(window.innerWidth < 768)
+      }
+      checkMobile()
+      window.addEventListener('resize', checkMobile)
+      return () => window.removeEventListener('resize', checkMobile)
+    }
+  }, [isMobile])
 
   // Removed internal editing state - using parent component's dialog-based editing
 
@@ -175,12 +191,40 @@ export function WeeklyCalendar({ tasks = [], onTaskUpdate, onTaskEdit, onTaskDel
     const diff = startOfWeek.getDate() - day
     startOfWeek.setDate(diff)
 
-    return Array.from({ length: 7 }, (_, i) => {
+    const allDays = Array.from({ length: 7 }, (_, i) => {
       const date = new Date(startOfWeek)
       date.setDate(startOfWeek.getDate() + i)
       return date
     })
-  }, [currentWeek])
+
+    // Return only 2 days for mobile, starting from mobileStartDay
+    if (isActuallyMobile) {
+      return allDays.slice(mobileStartDay, mobileStartDay + 2)
+    }
+
+    return allDays
+  }, [currentWeek, isActuallyMobile, mobileStartDay])
+
+  // Mobile navigation functions
+  const navigateMobileDays = (direction: 'prev' | 'next') => {
+    if (direction === 'prev') {
+      if (mobileStartDay > 0) {
+        setMobileStartDay(mobileStartDay - 1)
+      } else {
+        // Go to previous week, show last 2 days
+        navigateWeek('prev')
+        setMobileStartDay(5) // Show Fri-Sat
+      }
+    } else {
+      if (mobileStartDay < 5) {
+        setMobileStartDay(mobileStartDay + 1)
+      } else {
+        // Go to next week, show first 2 days
+        navigateWeek('next')
+        setMobileStartDay(0) // Show Sun-Mon
+      }
+    }
+  }
 
   const formatDate = (date: Date) => {
     return date.toISOString().split("T")[0]
@@ -491,9 +535,24 @@ export function WeeklyCalendar({ tasks = [], onTaskUpdate, onTaskEdit, onTaskDel
       </div>
 
       <div className="overflow-x-auto">
-        <div className="min-w-[800px]" ref={calendarRef}>
+        <div className={cn("min-w-[800px]", isActuallyMobile && "min-w-[400px]")} ref={calendarRef}>
+          {/* Mobile navigation */}
+          {isActuallyMobile && (
+            <div className="flex items-center justify-between mb-2 px-2">
+              <Button variant="outline" size="sm" onClick={() => navigateMobileDays('prev')}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm font-medium">
+                {weekDays[0].toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} - {weekDays[1].toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+              </span>
+              <Button variant="outline" size="sm" onClick={() => navigateMobileDays('next')}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
           {/* Day headers */}
-          <div className="grid grid-cols-8 border-b">
+          <div className={cn("grid border-b", isActuallyMobile ? "grid-cols-3" : "grid-cols-8")}>
             <div className="p-2 text-sm font-medium text-muted-foreground">{/* Empty cell for time column */}</div>
             {weekDays.map((day, index) => (
               <div
@@ -516,7 +575,7 @@ export function WeeklyCalendar({ tasks = [], onTaskUpdate, onTaskEdit, onTaskDel
           </div>
 
           {/* All-day events row */}
-          <div className="grid grid-cols-8 border-b bg-muted/30">
+          <div className={cn("grid border-b bg-muted/30", isActuallyMobile ? "grid-cols-3" : "grid-cols-8")}>
             <div className="p-2 text-xs text-muted-foreground font-medium">all-day</div>
             {weekDays.map((day, dayIndex) => (
               <div key={dayIndex} className="border-l p-1 min-h-[40px] relative">
@@ -554,7 +613,7 @@ export function WeeklyCalendar({ tasks = [], onTaskUpdate, onTaskEdit, onTaskDel
               <div className="w-2 h-2 bg-red-500 rounded-full"></div>
             </div>
 
-            <div className="grid grid-cols-8">
+            <div className={cn("grid", isActuallyMobile ? "grid-cols-3" : "grid-cols-8")}>
               {/* Time column */}
               <div className="relative">
                 {timeSlots.map((time, index) => (
