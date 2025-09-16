@@ -43,4 +43,19 @@ export default defineSchema({
   }).index("by_email", ["email"])
     .index("by_status", ["status"])
     .index("by_requested_at", ["requestedAt"]),
+
+  // User feedback
+  feedback: defineTable({
+    title: v.string(),
+    message: v.string(),
+    submittedAt: v.string(),
+    userId: v.optional(v.string()), // Optional user ID if authenticated
+    userEmail: v.optional(v.string()), // Optional email if provided
+    status: v.union(v.literal("new"), v.literal("reviewed"), v.literal("resolved")),
+    adminNotes: v.optional(v.string()),
+    reviewedAt: v.optional(v.string()),
+    reviewedBy: v.optional(v.string()),
+  }).index("by_status", ["status"])
+    .index("by_submitted_at", ["submittedAt"])
+    .index("by_user", ["userId"]),
 });

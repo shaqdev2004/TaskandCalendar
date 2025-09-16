@@ -12,6 +12,7 @@ import {
   User,
   ChevronRight,
   MoreHorizontal,
+  MessageSquare,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -61,6 +62,11 @@ const data = {
     },
   ],
   navSecondary: [
+    {
+      title: "Feedback",
+      url: "/feedback",
+      icon: MessageSquare,
+    },
     {
       title: "Settings",
       url: "/settings",

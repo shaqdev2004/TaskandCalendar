@@ -14,6 +14,7 @@ import type {
   FunctionReference,
 } from "convex/server";
 import type * as calendarRequests from "../calendarRequests.js";
+import type * as feedback from "../feedback.js";
 import type * as tasks from "../tasks.js";
 
 /**
@@ -26,6 +27,7 @@ import type * as tasks from "../tasks.js";
  */
 declare const fullApi: ApiFromModules<{
   calendarRequests: typeof calendarRequests;
+  feedback: typeof feedback;
   tasks: typeof tasks;
 }>;
 export declare const api: FilterApi<
