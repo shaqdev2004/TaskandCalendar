@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     // Simulate sending email (replace with actual email service)
     const emailData = {
-      from: 'onboarding@resend.dev', // You'll need to replace this with your verified domain
+      from: 'shaqdev2004@gmail.com', // You'll need to replace this with your verified domain
       to: 'shaqdev2004@gmail.com',
       subject: 'Google Calendar Access Request',
       text: `Google Calendar Access Request
